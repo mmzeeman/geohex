@@ -4,6 +4,19 @@
 %% Optimized for "Human Scale" landmarks (~2.4m) and "Smooth Privacy" steps.
 %% This implementation uses 24 levels of precision.
 %%
+%% Cell sizes (flat-to-flat, pointy-top hex):
+%%   Level 24: ~2.4m       — Meeting point / Bench (finest)
+%%   Level 22: ~9.6m       — Building entrance
+%%   Level 20: ~38.4m      — Large building / Shop
+%%   Level 18: ~153.6m     — Privacy 1: Building block
+%%   Level 17: ~307.2m     — Privacy 2: Neighborhood
+%%   Level 16: ~614.4m     — Privacy 3: District
+%%   Level 14: ~2.46km     — Local region
+%%   Level 12: ~9.8km      — City Scale
+%%   Level 8:  ~157km      — Metropolitan area
+%%   Level 4:  ~2,516km     — Sub-continental
+%%   Level 1:  ~20,132km    — Global Scale
+%%
 %% Each level is exactly 2 times coarser (linearly) than the one below it.
 %% This is an Aperture 4 hierarchy (Area x 4 per level). No rotation.
 %%
@@ -11,6 +24,27 @@
 %%   {Q, R} integers at level 24 (finest).
 %%   display/2 renders as an interleaved Hexadecimal string (0-F).
 %%   Each character represents TWO levels (4 bits: Qn Rn Qn+1 Rn+1).
+%%
+%% Usage:
+%%   Code  = geohex:encode(52.3616, 4.8784).
+%%   S     = geohex:display(Code).              %% "6CEC50ECC574"
+%%
+%% Examples (Level 24):
+%%   Vondelpark Entrance : 6CEC50ECC574
+%%   Leidseplein, Ams.   : 6CEC50EDAE5F
+%%   De Dam, Amsterdam   : 6CEC50FBAC1E
+%%   De Dom, Utrecht     : 6CEC632CA909
+%%
+%% Hierarchical Examples:
+%%   Location             | L22 (~9.6m) | L18 (~154m) | L17 (~307m) | L16 (~614m) | L12 (~9.8km)
+%%   ---------------------|-------------|-------------|-------------|-------------|------------
+%%   Leidseplein          | 6CEC50EDAE5 | 6CEC50EDA   | 6CEC50ED2   | 6CEC50ED    | 6CEC50
+%%   Vondelpark Entrance  | 6CEC50ECC57 | 6CEC50ECC   | 6CEC50EC3   | 6CEC50EC    | 6CEC50
+%%   De Dam, Amsterdam    | 6CEC50FBAC1 | 6CEC50FBA   | 6CEC50FB2   | 6CEC50FB    | 6CEC50
+%%   De Dom, Utrecht      | 6CEC632CA90 | 6CEC632CA   | 6CEC632C2   | 6CEC632C    | 6CEC63
+%%
+%% Projection: pointy-top hex, equirectangular, centred on (0.0, 0.0).
+%% Coverage: Global.
 
 -module(geohex).
 
