@@ -28,9 +28,9 @@ display_parse_round_trip_test() ->
 
           prefix_property_test() ->
           Digits = hexveil:encode(52.3616, 4.8784),
-          P1 = hexveil:display(Digits, 24), %% Level 24: (24+1)/3 = 9 chars
-          P2 = hexveil:display(Digits, 23), %% Level 23: (23+1)/3 = 8 chars
-          P3 = hexveil:display(Digits, 22), %% Level 22: (22+1)/3 = 8 chars
+          P1 = hexveil:display(hexveil:coarsen(Digits, 24)), %% Level 24: (24+1)/3 = 9 chars
+          P2 = hexveil:display(hexveil:coarsen(Digits, 23)), %% Level 23: (23+1)/3 = 8 chars
+          P3 = hexveil:display(hexveil:coarsen(Digits, 22)), %% Level 22: (22+1)/3 = 8 chars
           ?assertEqual(9, byte_size(P1)),
           ?assertEqual(8, byte_size(P2)),
           ?assertEqual(8, byte_size(P3)),

@@ -22,16 +22,12 @@
 -export([
     encode/2,
     decode/1,
-    decode/2,
     coarsen/2,
     neighbors/1,
-    neighbors/2,
     to_axial/1,
     from_axial/3,
     cell_geometry/1,
-    cell_geometry/2,
     display/1,
-    display/2,
     parse/1
 ]).
 
@@ -60,9 +56,7 @@ encode(Lat, Lon) ->
 
 %% @doc Decode a list of digits to {Lat, Lon} center.
 decode(Digits) ->
-    decode(Digits, length(Digits)).
-
-decode(Digits, Level) ->
+    Level = length(Digits),
     {Q, R} = digits_to_axial(lists:sublist(Digits, Level)),
     %% Scale to the coordinate system of MAX_LEVEL.
     {SQ, SR} = scale_up(Q - 1/3, R + 2/3, ?MAX_LEVEL - Level),
@@ -77,9 +71,7 @@ coarsen(Digits, Level) ->
     lists:sublist(Digits, Level).
 
 neighbors(Digits) ->
-    neighbors(Digits, length(Digits)).
-
-neighbors(Digits, Level) ->
+    Level = length(Digits),
     {Q, R} = digits_to_axial(lists:sublist(Digits, Level)),
     [extract_digits(Q + DQ, R + DR, Level, []) || {DQ, DR} <- ?DIRECTIONS].
 
@@ -93,10 +85,8 @@ from_axial(Q, R, Level) ->
     extract_digits(Q + ?Q_OFF, R + ?R_OFF, Level, []).
 
 cell_geometry(Digits) ->
-    cell_geometry(Digits, length(Digits)).
-
-cell_geometry(Digits, Level) ->
-    {CLat, CLon} = decode(Digits, Level),
+    Level = length(Digits),
+    {CLat, CLon} = decode(Digits),
     {CX, CY} = latlon_to_xy(CLat, CLon),
     Scale = math:pow(math:sqrt(3), ?MAX_LEVEL - Level),
     Radius = ?R * Scale,
@@ -108,9 +98,7 @@ cell_geometry(Digits, Level) ->
      ) || A <- Angles].
 
 display(Digits) ->
-    display(Digits, length(Digits)).
-
-display(Digits, Level) ->
+    Level = length(Digits),
     Data = lists:sublist(Digits, Level),
     group_base27(list_to_binary(Data ++ [1]), <<>>).
 
