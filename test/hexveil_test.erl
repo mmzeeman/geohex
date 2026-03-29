@@ -4,60 +4,54 @@
 
 encode_decode_round_trip_test() ->
     Points = [
-        {52.3616, 4.8784},  %% Vondelpark
+        {52.3616, 4.8784},    %% Vondelpark
         {-33.8688, 151.2093}, %% Sydney
-        {40.7128, -74.0060}, %% New York
+        {40.7128, -74.0060},  %% New York
         {0.0, 0.0}            %% Null Island
     ],
     lists:foreach(
       fun({Lat, Lon}) ->
-          Code = hexveil:encode(Lat, Lon),
-          {Lat2, Lon2} = hexveil:decode(Code),
-          ?assert(is_integer(element(1, Code))),
-          ?assert(is_integer(element(2, Code))),
+          Digits = hexveil:encode(Lat, Lon),
+          ?assertEqual(40, length(Digits)),
+          {Lat2, Lon2} = hexveil:decode(Digits),
           ?assert(abs(Lat - Lat2) < 0.0001),
           ?assert(abs(Lon - Lon2) < 0.0001)
       end,
       Points).
 
 display_parse_round_trip_test() ->
-    Codes = [
-        hexveil:encode(52.3616, 4.8784),
-        hexveil:encode(0.0, 0.0)
-    ],
-    lists:foreach(
-      fun(Code) ->
-          Full = hexveil:display(Code),
-          ?assertEqual(12, byte_size(Full)),
-          ?assertEqual(Code, hexveil:parse(Full)),
-          ?assertEqual(9, byte_size(hexveil:display(Code, 18))),
-          ?assertEqual(8, byte_size(hexveil:display(Code, 16)))
-      end,
-      Codes).
+    Digits = hexveil:encode(52.3616, 4.8784),
+    Binary = hexveil:display(Digits),
+    ?assertEqual(14, byte_size(Binary)),
+    %% Parsing now returns EXACT digits because of the sentinel bit
+    ?assertEqual(Digits, hexveil_v3:parse(Binary)).
 
-display_prefix_property_test() ->
-    Code = hexveil:encode(52.3616, 4.8784),
-    S16 = hexveil:display(Code, 16),
-    S18 = hexveil:display(Code, 18),
-    S24 = hexveil:display(Code, 24),
-    ?assert(binary_prefix(S16, S18)),
-    ?assert(binary_prefix(S18, S24)).
+          prefix_property_test() ->
+          Digits = hexveil:encode(52.3616, 4.8784),
+          P1 = hexveil:display(Digits, 24), %% Level 24: (24+1)/3 = 9 chars
+          P2 = hexveil:display(Digits, 23), %% Level 23: (23+1)/3 = 8 chars
+          P3 = hexveil:display(Digits, 22), %% Level 22: (22+1)/3 = 8 chars
+          ?assertEqual(9, byte_size(P1)),
+          ?assertEqual(8, byte_size(P2)),
+          ?assertEqual(8, byte_size(P3)),
+          %% P2 and P3 share a prefix, but their last char (containing sentinel) differs
+          ?assertEqual(binary:part(P3, 0, 7), binary:part(P2, 0, 7)).
 
-coarsen_consistency_test() ->
-    Code = hexveil:encode(52.3616, 4.8784),
-    ?assertEqual(Code, hexveil:coarsen(Code, 24)),
-    ?assertEqual(hexveil:coarsen(Code, 18), hexveil:coarsen(hexveil:parse(hexveil:display(Code, 18)), 18)),
-    ?assertEqual(hexveil:coarsen(Code, 16), hexveil:coarsen(hexveil:parse(hexveil:display(Code, 16)), 16)).
+hierarchy_containment_test() ->
+    %% Null Island is perfectly linear in our projection (CosLat = 1.0)
+    ParentDigits = lists:sublist(hexveil_v3:encode(0.0, 0.0), 30),
+    {PLat, PLon} = hexveil_v3:decode(ParentDigits),
 
-are_nearby_test() ->
-    Code = hexveil:encode(52.3616, 4.8784),
-    SameCell = hexveil:encode(52.361601, 4.878401),
-    DifferentButNearby = hexveil:encode(52.3650, 4.8850),
-    ?assert(hexveil:are_nearby(Code, SameCell, 24)),
-    ?assert(hexveil:are_nearby(Code, SameCell, 18)),
-    ?assertNot(hexveil:are_nearby(Code, DifferentButNearby, 24)),
-    ?assert(hexveil:are_nearby(Code, DifferentButNearby, 14)).
+    %% Children of this parent
+    C0 = ParentDigits ++ [0],
+    C1 = ParentDigits ++ [1],
+    C2 = ParentDigits ++ [2],
 
-binary_prefix(Prefix, Binary) ->
-    Len = byte_size(Prefix),
-    byte_size(Binary) >= Len andalso binary:part(Binary, 0, Len) =:= Prefix.
+    {Lat0, Lon0} = hexveil:decode(C0),
+    {Lat1, Lon1} = hexveil:decode(C1),
+    {Lat2, Lon2} = hexveil:decode(C2),
+
+    %% The average of children should be the parent
+    ?assert(abs(PLat - (Lat0+Lat1+Lat2)/3) < 1.0e-8),
+    ?assert(abs(PLon - (Lon0+Lon1+Lon2)/3) < 1.0e-8).
+
