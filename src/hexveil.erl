@@ -39,8 +39,9 @@
 -define(M_PER_DEG_LAT, 111319.49).
 
 %% Offset to bring Earth into the domain of root {0, -1}.
--define(Q_OFF, 1000000000).
--define(R_OFF, 1000000000).
+%% Earth spans ~16M cells at MAX_LEVEL, so 20M gives a safe margin.
+-define(Q_OFF, 20_000_000).
+-define(R_OFF, 20_000_000).
 -define(DIRECTIONS, [{1,0},{0,1},{-1,1},{-1,0},{0,-1},{1,-1}]).
 
 %%
