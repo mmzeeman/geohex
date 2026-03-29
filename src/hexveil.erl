@@ -107,7 +107,8 @@ cell_geometry(Digits, Level) ->
         CY + Radius * math:sin((A + Rotation) * math:pi() / 180)
      ) || A <- Angles].
 
-display(Digits) -> display(Digits, length(Digits)).
+display(Digits) ->
+    display(Digits, length(Digits)).
 
 %% @doc Compact display using a sentinel bit to encode the level.
 display(Digits, Level) ->
@@ -174,9 +175,9 @@ offset(0) -> {0, 0};
 offset(1) -> {1, 0};
 offset(2) -> {0, 1}.
 
-mod3(X) ->
-    R = X rem 3,
-    if R < 0 -> R + 3; true -> R end.
+mod3(X) when X > 0 -> X rem 3;
+mod3(X) when X < 0 -> ((X rem 3) + 3) rem 3;
+mod3(0) -> 0.
 
 %% ---------------------------------------------------------------------------
 %% Internal: Geometry
@@ -206,7 +207,10 @@ hex_round(Qf, Rf) ->
     Rq = round(Qf), Rr = round(Rf), Rs = round(Sf),
     Dq = abs(Rq - Qf), Dr = abs(Rr - Rf), Ds = abs(Rs - Sf),
     if
-        Dq > Dr andalso Dq > Ds -> {-Rr - Rs, Rr};
-        Dr > Ds                  -> {Rq, -Rq - Rs};
-        true                     -> {Rq, Rr}
+        Dq > Dr andalso Dq > Ds ->
+            {-Rr - Rs, Rr};
+        Dr > Ds ->
+            {Rq, -Rq - Rs};
+        true ->
+            {Rq, Rr}
     end.
