@@ -4,25 +4,66 @@
 
 encode_decode_round_trip_test() ->
     Points = [
-        {52.3616, 4.8784},    %% Vondelpark
-        {-33.8688, 151.2093}, %% Sydney
-        {40.7128, -74.0060},  %% New York
+        {90.0, 0.0},          %% North Pole
+        {-90.0, 0.0},         %% South Pole
+        {0.0, 180.0},         %% Equator / IDL
+        {0.0, -180.0},        %% Equator / IDL
+        {85.0, 179.9},        %% High latitude
+        {-85.0, -179.9},      %% High latitude
+        {10.0, 10.0},         %% Some point
+        {48.0, 16.0},
+        {0.5, 0.5},           %% Within 141km
+        {-0.2, 0.1},          %% Within 141km
         {0.0, 0.0}            %% Null Island
     ],
     lists:foreach(
       fun({Lat, Lon}) ->
-              Digits = hexveil:encode(Lat, Lon),
-              ?assertEqual(40, byte_size(Digits)),
-              {Lat2, Lon2} = hexveil:decode(Digits),
-              ?assert(abs(Lat - Lat2) < 0.0001),
-              ?assert(abs(Lon - Lon2) < 0.0001)
+              FullDigits = hexveil:encode(Lat, Lon),
+              ?assertEqual(32, byte_size(FullDigits)),
+
+              lists:foreach(
+                fun(L) ->
+                        Digits = hexveil:coarsen(FullDigits, L),
+                        {Lat2, Lon2} = hexveil:decode(Digits),
+                        
+                        Dist = distance_m(Lat, Lon, Lat2, Lon2),
+                        
+                        %% Expected circumradius at level L
+                        %% R = 1.732 * sqrt(3)^(32-L)
+                        ExpectedR = 1.7320508 * math:pow(math:sqrt(3), 32 - L),
+                        
+                        %% Margin for projection distortion (especially at poles)
+                        Tolerance = if abs(Lat) > 89.9 -> ExpectedR * 3.0;
+                                       abs(Lat) > 80.0 -> ExpectedR * 10.0;
+                                       true -> ExpectedR * 1.5 
+                                    end,
+
+                        io:format(user, "Level ~p | Lat: ~5.1f, Lon: ~6.1f -> Dist: ~10.2f m (ExpectedR: ~10.2f m)~n", 
+                                  [L, Lat, Lon, Dist, ExpectedR]),
+                        
+                        ?assert(Dist < Tolerance)
+                end,
+                [32, 25, 24, 23, 10])
       end,
       Points).
+
+%% Haversine distance in meters
+distance_m(Lat1, Lon1, Lat2, Lon2) ->
+    R = 6371000, %% Earth radius
+    Phi1 = Lat1 * math:pi() / 180,
+    Phi2 = Lat2 * math:pi() / 180,
+    DPhi = (Lat2 - Lat1) * math:pi() / 180,
+    DLon = (Lon2 - Lon1) * math:pi() / 180,
+    A = math:sin(DPhi/2) * math:sin(DPhi/2) +
+        math:cos(Phi1) * math:cos(Phi2) *
+        math:sin(DLon/2) * math:sin(DLon/2),
+    C = 2 * math:atan2(math:sqrt(A), math:sqrt(1-A)),
+    R * C.
 
 display_parse_round_trip_test() ->
     Digits = hexveil:encode(52.3616, 4.8784),
     Binary = hexveil:display(Digits),
-    ?assertEqual(14, byte_size(Binary)),
+    ?assertEqual(11, byte_size(Binary)),
     %% Parsing now returns EXACT digits because of the sentinel bit
     ?assertEqual(Digits, hexveil:parse(Binary)).
 
@@ -32,7 +73,7 @@ prefix_property_test() ->
     P2 = hexveil:display(hexveil:coarsen(Digits, 23)), %% Level 23: (23+1)/3 = 8 chars
     P3 = hexveil:display(hexveil:coarsen(Digits, 22)), %% Level 22: (22+1)/3 = 8 chars
     P4 = hexveil:display(hexveil:coarsen(Digits, 21)), %% Level 21: (21+1)/3 = 8 chars
-    P5 = hexveil:display(hexveil:coarsen(Digits, 20)), %% Level 22: (20+1)/3 = 7 chars
+    P5 = hexveil:display(hexveil:coarsen(Digits, 20)), %% Level 20: (20+1)/3 = 7 chars
     ?assertEqual(9, byte_size(P1)),
     ?assertEqual(8, byte_size(P2)),
     ?assertEqual(8, byte_size(P3)),
@@ -43,7 +84,7 @@ prefix_property_test() ->
 
 hierarchy_containment_test() ->
     %% Null Island is perfectly linear in our projection (CosLat = 1.0)
-    ParentDigits = binary:part(hexveil:encode(0.0, 0.0), 0, 30),
+    ParentDigits = binary:part(hexveil:encode(0.0, 0.0), 0, 20),
     {PLat, PLon} = hexveil:decode(ParentDigits),
 
     %% Children of this parent
@@ -58,4 +99,3 @@ hierarchy_containment_test() ->
     %% The average of children should be the parent
     ?assert(abs(PLat - (Lat0+Lat1+Lat2)/3) < 1.0e-8),
     ?assert(abs(PLon - (Lon0+Lon1+Lon2)/3) < 1.0e-8).
-
