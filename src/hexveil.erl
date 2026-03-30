@@ -28,10 +28,21 @@
     from_axial/3,
     cell_geometry/1,
     display/1,
-    parse/1
+    parse/1,
+
+    digits_to_axial/1,
+    %digits_to_axial/2,
+    scale_up/3,
+    scale_down/3,
+    latlon_to_xy/2,
+
+    xy_to_axial/2,
+    hex_round/2,
+    mod3/1
+
 ]).
 
--define(MAX_LEVEL, 40).
+-define(MAX_LEVEL, 20).
 -define(R, 1.3856406).      %% Side length for 2.4m width
 -define(BQ_X, 2.4).         %% Distance between centers (X)
 -define(BR_X, 1.2).         %% X offset for R
@@ -40,8 +51,11 @@
 
 %% Offset to bring Earth into the domain of root {0, -1}.
 %% Earth spans ~16M cells at MAX_LEVEL, so 20M gives a safe margin.
--define(Q_OFF, 20_000_000).
--define(R_OFF, 20_000_000).
+-define(Q_OFF, 0).
+-define(R_OFF, 0).
+-define(SEED, {0, 0}). % scale_down(?Q_OFF, ?R_OFF, 40)
+%-define(Q_OFF, -3486784401).
+%-define(R_OFF,  3486784401).
 -define(DIRECTIONS, [{1,0},{0,1},{-1,1},{-1,0},{0,-1},{1,-1}]).
 
 %%
@@ -57,15 +71,19 @@ encode(Lat, Lon) ->
 
 %% @doc Decode a list of digits to {Lat, Lon} center.
 decode(Digits) ->
-    {Q, R} = digits_to_axial(Digits),
-    %% Scale to the coordinate system of MAX_LEVEL.
-    {SQ, SR} = scale_up(Q - 1/3, R + 2/3, ?MAX_LEVEL - byte_size(Digits)),
-    {X, Y} = axial_to_xy(SQ - ?Q_OFF, SR - ?R_OFF),
+    Level = byte_size(Digits),
+    Padding = ?MAX_LEVEL - Level,
+    {Q, R} = digits_to_axial(<<Digits/binary, 0:(Padding*8)>>),
+    {X, Y} = axial_to_xy(Q, R),
     xy_to_latlon(X, Y).
 
 scale_up(Q, R, 0) -> {Q, R};
 scale_up(Q, R, L) when L > 0 ->
     scale_up(2*Q + R, -Q + R, L-1).
+
+scale_down(Q, R, 0) -> {Q, R};
+scale_down(Q, R, L) when L > 0 ->
+    scale_down(floor_div(Q - R, 3), floor_div(Q + 2*R, 3), L-1).
 
 coarsen(Digits, Level) ->
     binary:part(Digits, 0, Level).
@@ -140,21 +158,67 @@ from_b27(C) -> C - $a + 10.
 extract_digits(_Q, _R, 0, Acc) -> Acc;
 extract_digits(Q, R, L, Acc) ->
     Digit = mod3(Q - R),
+    % io:format("L=~p Q=~p R=~p Digit=~p~n", [L, Q, R, Digit]),
     {DQ, DR} = offset(Digit),
     NQ = Q - DQ,
     NR = R - DR,
-    PQ = (NQ - NR) div 3,
-    PR = (NQ + 2*NR) div 3,
+    PQ = floor_div(NQ - NR, 3),
+    PR = floor_div(NQ + 2*NR, 3),
     extract_digits(PQ, PR, L-1, <<Digit, Acc/binary>>).
 
-digits_to_axial(Digits) ->
-    digits_to_axial(Digits, {0, -1}).
+floor_div(A, B) when A >= 0 -> A div B;
+floor_div(A, B) -> (A - B + 1) div B.
 
-digits_to_axial(<<Digit, Rest/binary>>, {Q, R}) ->
-    {DQ, DR} = offset(Digit),
-    digits_to_axial(Rest, {2*Q + R + DQ, -Q + R + DR});
+%digits_to_axial(Digits) ->
+%    digits_to_axial(0, byte_size(Digits), Digits, ?SEED).
+%
+%digits_to_axial(Pos, Max, Digits, {Q, R}) when Pos < Max ->
+%    Digit = binary:at(Digits, Pos),
+%    {DQ, DR} = offset(Digit),
+%    digits_to_axial(Pos + 1, Max, Digits, {2*Q + R + DQ, -Q + R + DR});
+%digits_to_axial(_Pos, _Max, _Digits, Acc) ->
+%    Acc.
+
+%digits_to_axial(Digits) ->
+%    Level = byte_size(Digits),
+%    digits_to_axial(Digits, Level, {0, 0}).
+%
+%digits_to_axial(<<Digit, Rest/binary>>, L, {Q, R}) ->
+%    {DQ, DR} = offset(Digit),
+%    {SQ, SR} = scale_up(DQ, DR, L),
+%    digits_to_axial(Rest, L, {Q + SQ, R + SR});
+%digits_to_axial(<<>>, _L, Acc) ->
+%    Acc.
+
+offset2(0, 0) -> {0, 0};
+offset2(0, 1) -> {1, 0};
+offset2(0, 2) -> {0, 1};
+offset2(1, 0) -> {2, -1};
+offset2(1, 1) -> {3, -1};
+offset2(1, 2) -> {2, 0};
+offset2(2, 0) -> {1, 1};
+offset2(2, 1) -> {2, 1};
+offset2(2, 2) -> {1, 2}.
+
+digits_to_axial(Digits) ->
+    digits_to_axial(Digits, {0, 0}).
+
+digits_to_axial(<<D1, D2, Rest/binary>>, {Q, R}) ->
+    {DQ, DR} = offset2(D1, D2),
+    digits_to_axial(Rest, {3*Q + 3*R + DQ, -3*Q + DR});
 digits_to_axial(<<>>, Acc) ->
     Acc.
+
+%digits_to_axial(Digits) ->
+%    Size = byte_size(Digits),
+%    digits_to_axial(Size - 1, Digits, {0, 0}).
+%
+%digits_to_axial(-1, _Digits, Acc) ->
+%    Acc;
+%digits_to_axial(Pos, Digits, {Q, R}) ->
+%    Digit = binary:at(Digits, Pos),
+%    {DQ, DR} = offset(Digit),
+%    digits_to_axial(Pos - 1, Digits, {2*Q + R + DQ, -Q + R + DR}).
 
 offset(0) -> {0, 0};
 offset(1) -> {1, 0};
