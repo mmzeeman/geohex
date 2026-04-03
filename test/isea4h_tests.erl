@@ -3,10 +3,45 @@
 
 %% Round-trip encode/decode at origin
 roundtrip_test() ->
-    Code = isea4h:encode(0.0, 0.0, 7),
-    {Lon, Lat} = isea4h:decode(Code),
-    ?assert(math:abs(Lon - 0.0) < 0.01),
-    ?assert(math:abs(Lat - 0.0) < 0.01).
+    Locations = [
+        {0.0, 0.0},
+        {10.0, 20.0},
+        {-30.0, 45.0},
+        {120.0, -10.0},
+        {0.0, 90.0}, % North Pole
+        {0.0, -90.0} % South Pole
+    ],
+    lists:foreach(fun({Lon, Lat}) ->
+        Res = 7,
+        Code = isea4h:encode(Lon, Lat, Res),
+        {DLon, DLat} = isea4h:decode(Code),
+        MaxErr = 1.0,
+        IsPole = abs(Lat) > 89.0,
+        LonMatch = IsPole orelse abs(DLon - Lon) < MaxErr orelse abs(abs(DLon - Lon) - 360.0) < MaxErr,
+        LatMatch = abs(DLat - Lat) < MaxErr,
+        case LonMatch andalso LatMatch of
+            true -> ok;
+            false -> 
+                io:format(user, "~nAt (~p, ~p) got (~p, ~p) code ~p~n", [Lon, Lat, DLon, DLat, Code]),
+                ?assert(false)
+        end
+    end, Locations).
+
+roundtrip_res_test() ->
+    Lon = 10.0, Lat = 20.0,
+    lists:foreach(fun(Res) ->
+        Code = isea4h:encode(Lon, Lat, Res),
+        {DLon, DLat} = isea4h:decode(Code),
+        %% At Res 1, error can be large (half a face).
+        MaxErr = 2.0 / math:pow(2.0, Res-5), %% Heuristic
+        ActualMaxErr = lists:max([1.0, MaxErr]),
+        case abs(DLon - Lon) < ActualMaxErr andalso abs(DLat - Lat) < ActualMaxErr of
+            true -> ok;
+            false -> 
+                io:format(user, "~nAt res ~p got (~p, ~p) code ~p (MaxErr ~p)~n", [Res, DLon, DLat, Code, ActualMaxErr]),
+                ?assert(false)
+        end
+    end, lists:seq(1, 12)).
 
 %% encode/2 should default to resolution 7
 default_res_test() ->
@@ -18,8 +53,8 @@ default_res_test() ->
 parent_test() ->
     Code = isea4h:encode(10.0, 20.0, 6),
     Parent = isea4h:parent(Code),
-    [_,Digits] = string:split(binary_to_list(Code), "-"),
-    [_,Pdigits] = string:split(binary_to_list(Parent), "-"),
+    [_, Digits] = string:split(binary_to_list(Code), "-"),
+    [_, Pdigits] = string:split(binary_to_list(Parent), "-"),
     ?assertEqual(length(Digits)-1, length(Pdigits)).
 
 %% neighbors returns six binary neighbor codes

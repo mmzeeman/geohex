@@ -1,8 +1,8 @@
 -module(isea4h).
 -export([encode/3, encode/2, privacy_code/3, parent/1, neighbors/1, decode/1, ico_verts/0]).
 
--define(D2R, math:pi() / 180.0).
--define(BASE_SCALE, 0.58).
+-define(D2R, 0.017453292519943295). % (math:pi() / 180.0)).
+-define(BASE_SCALE, 2.0).
 
 encode(Lon, Lat, Res) when Res >= 1, Res =< 12 ->
     {X, Y, Z} = to_xyz(Lon, Lat),
@@ -67,13 +67,20 @@ to_xyz(Lon, Lat) ->
      math:cos(La)*math:sin(Lo),
      math:sin(La)}.
 
-ico_verts() ->
-    UpLat = math:atan(0.5) / ?D2R,
-    DnLat = -UpLat,
-    [to_xyz(0.0, 90.0)]
-    ++ [to_xyz(I*72.0, UpLat) || I <- lists:seq(0,4)]
-    ++ [to_xyz(I*72.0+36.0,  DnLat) || I <- lists:seq(0,4)]
-    ++ [to_xyz(0.0, -90.0)].
+face_centres() ->
+    case persistent_term:get({?MODULE, face_centres}, undefined) of
+        undefined ->
+            VT = list_to_tuple(ico_verts()),
+            Centres = [begin
+                 {Ax,Ay,Az} = element(A+1, VT),
+                 {Bx,By,Bz} = element(B+1, VT),
+                 {Cx,Cy,Cz} = element(C+1, VT),
+                 unit({(Ax+Bx+Cx)/3.0, (Ay+By+Cy)/3.0, (Az+Bz+Cz)/3.0})
+             end || {A,B,C} <- ico_faces()],
+            persistent_term:put({?MODULE, face_centres}, Centres),
+            Centres;
+        Centres -> Centres
+    end.
 
 ico_faces() ->
     [{0,1,2}, {0,2,3}, {0,3,4}, {0,4,5}, {0,5,1},
@@ -89,14 +96,19 @@ ico_faces() ->
      {9,11,10},
      {10,11,6}].
 
-face_centres() ->
-    VT = list_to_tuple(ico_verts()),
-    [begin
-         {Ax,Ay,Az} = element(A+1, VT),
-         {Bx,By,Bz} = element(B+1, VT),
-         {Cx,Cy,Cz} = element(C+1, VT),
-         unit({(Ax+Bx+Cx)/3.0, (Ay+By+Cy)/3.0, (Az+Bz+Cz)/3.0})
-     end || {A,B,C} <- ico_faces()].
+ico_verts() ->
+    case persistent_term:get({?MODULE, ico_verts}, undefined) of
+        undefined ->
+            UpLat = math:atan(0.5) / ?D2R,
+            DnLat = -UpLat,
+            Verts = [to_xyz(0.0, 90.0)]
+            ++ [to_xyz(I*72.0, UpLat) || I <- lists:seq(0,4)]
+            ++ [to_xyz(I*72.0+36.0,  DnLat) || I <- lists:seq(0,4)]
+            ++ [to_xyz(0.0, -90.0)],
+            persistent_term:put({?MODULE, ico_verts}, Verts),
+            Verts;
+        Verts -> Verts
+    end.
 
 nearest_face(X, Y, Z) ->
     Cs = face_centres(),
@@ -152,14 +164,14 @@ hex_round(Qf, Rf) ->
 %% --- digit encoding (returns flat charlist) ---
 
 to_digits(QG, RG, Res) ->
-    Off = 1 bsl Res,
+    Off = 1 bsl (Res-1),
     Q   = QG + Off,
     R   = RG + Off,
     [$0 + ((Q bsr (Res-L)) band 1)*2 + ((R bsr (Res-L)) band 1)
      || L <- lists:seq(1, Res)].
 
 from_digits(Digits, Res) ->
-    Off = 1 bsl Res,
+    Off = 1 bsl (Res-1),
     {Q, R} = lists:foldl(
         fun({D, L}, {Qa, Ra}) ->
             Bit = Res - L,
