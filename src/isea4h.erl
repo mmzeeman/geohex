@@ -1,36 +1,49 @@
+
 -module(isea4h).
--export([encode/3, encode/2, privacy_code/3, parent/1, neighbors/1, decode/1, ico_verts/0, face_centres/0]).
+
+-export([
+    encode/2, encode/1,
+    decode/1,
+    parent/1,
+    neighbors/1,
+    ico_verts/0,
+    face_centres/0
+]).
 
 -define(D2R, 0.017453292519943295). % (math:pi() / 180.0)).
 -define(BASE_SCALE, 2.0).
+-define(NR_FACES, 20).
 
-encode(Lat, Lon, Res) when Res >= 1, Res =< 12 ->
-    {X, Y, Z} = to_xyz(Lat, Lon),
-    Face = nearest_face(X, Y, Z),
-    {Q, R} = project(X, Y, Z, Face),
-    {QG, RG} = to_grid(Q, R, Res),
-    Digits = to_digits(QG, RG, Res),
-    FaceStr = io_lib:format("~2..0B", [Face]),
-    iolist_to_binary([FaceStr, "-", Digits]).
+encode(Coord) ->
+    encode(Coord, 7).
 
-encode(Lat, Lon) ->
-    encode(Lat, Lon, 7).
+encode({Lat, Lon}, Res) when Res >= 1, Res =< 12 ->
+    XYZ = to_xyz({Lat, Lon}),
+    Face = nearest_face(XYZ),
+    Axial = project(XYZ, Face),
+    SnappedAxial = to_grid(Axial, Res),
+    to_code(Face, SnappedAxial, Res).
 
-privacy_code(Lat, Lon, city) ->
-    encode(Lat, Lon, 4);
-privacy_code(Lat, Lon, district) ->
-    encode(Lat, Lon, 6);
-privacy_code(Lat, Lon, neighbourhood) ->
-    encode(Lat, Lon, 7);
-privacy_code(Lat, Lon, block) ->
-    encode(Lat, Lon, 9).
+decode(<<FaceBin:1/binary, $-, DigitsBin/binary>>) ->
+    Face = binary_to_integer(FaceBin, ?NR_FACES),
+    Res = byte_size(DigitsBin),
 
-parent(Code) when is_binary(Code) -> parent(binary_to_list(Code));
-parent(Code) ->
-    [Face, Digits] = string:split(Code, "-"),
-    case length(Digits) > 1 of
-        true  -> iolist_to_binary([Face, "-", lists:droplast(Digits)]);
-        false -> iolist_to_binary([Face, "-", Digits])
+    Digits = binary_to_list(DigitsBin),
+    {QG, RG} = from_digits(Digits, Res),
+
+    Scale = ?BASE_SCALE / math:pow(2.0, Res),
+    Qf = QG * Scale,
+    Rf = RG * Scale,
+
+    XYZ = unproject(Qf, Rf, Face),
+    from_xyz(XYZ).
+
+parent(<<_:1/binary, $-, DigitsBin/binary>>=Code) ->
+    case byte_size(DigitsBin) > 1 of
+        true  ->
+            binary:part(Code, 0, byte_size(Code) - 1);
+        false ->
+            Code
     end.
 
 neighbors(Code) when is_binary(Code) -> neighbors(binary_to_list(Code));
@@ -39,33 +52,20 @@ neighbors(Code) ->
     Face = list_to_integer(FaceStr),
     Res  = length(Digits),
     {QG, RG} = from_digits(Digits, Res),
-    Dirs = [{1,0},{-1,0},{0,1},{0,-1},{1,-1},{-1,1}],
-    [begin
-         ND = to_digits(QG+DQ, RG+DR, Res),
-         iolist_to_binary([io_lib:format("~2..0B",[Face]), "-", ND])
-     end || {DQ,DR} <- Dirs].
-
-decode(Code) when is_binary(Code) -> decode(binary_to_list(Code));
-decode(Code) ->
-    [FaceStr, Digits] = string:split(Code, "-"),
-    Face = list_to_integer(FaceStr),
-    Res = length(Digits),
-    {QG, RG} = from_digits(Digits, Res),
-    Scale = ?BASE_SCALE / math:pow(2.0, Res),
-    Qf = QG * Scale,
-    Rf = RG * Scale,
-    {X, Y, Z} = unproject(Qf, Rf, Face),
-    Lon = math:atan2(Y, X) / ?D2R,
-    Lat = math:asin(Z) / ?D2R,
-    {Lat, Lon}.
+    Dirs = [{1,0}, {-1,0}, {0,1}, {0,-1}, {1,-1}, {-1,1}],
+    [to_code(Face, {QG+DQ, RG+DR}, Res) || {DQ, DR} <- Dirs].
 
 %% --- sphere geometry ---
 
-to_xyz(Lat, Lon) ->
-    Lo = Lon * ?D2R, La = Lat * ?D2R,
-    {math:cos(La)*math:cos(Lo),
-     math:cos(La)*math:sin(Lo),
-     math:sin(La)}.
+to_xyz({Lat, Lon}) ->
+    Lo = Lon * ?D2R,
+    La = Lat * ?D2R,
+    {math:cos(La)*math:cos(Lo), math:cos(La)*math:sin(Lo), math:sin(La)}.
+
+from_xyz({X, Y, Z}) ->
+    Lon = math:atan2(Y, X) / ?D2R,
+    Lat = math:asin(Z) / ?D2R,
+    {Lat, Lon}.
 
 face_centres() ->
     case persistent_term:get({?MODULE, face_centres}, undefined) of
@@ -84,33 +84,25 @@ face_centres() ->
 
 ico_faces() ->
     [{0,1,2}, {0,2,3}, {0,3,4}, {0,4,5}, {0,5,1},
-     {1,6,2},
-     {2,6,7}, {2,7,3},
-     {3,7,8}, {3,8,4},
-     {4,8,9}, {4,9,5},
-     {5,9,10}, {5,10,1},
-     {1,10,6},
-     {6,11,7},
-     {7,11,8},
-     {8,11,9},
-     {9,11,10},
-     {10,11,6}].
+     {1,6,2}, {2,6,7}, {2,7,3}, {3,7,8}, {3,8,4},
+     {4,8,9}, {4,9,5}, {5,9,10}, {5,10,1}, {1,10,6},
+     {6,11,7}, {7,11,8}, {8,11,9}, {9,11,10}, {10,11,6}].
 
 ico_verts() ->
     case persistent_term:get({?MODULE, ico_verts}, undefined) of
         undefined ->
             UpLat = math:atan(0.5) / ?D2R,
             DnLat = -UpLat,
-            Verts = [to_xyz(90.0, 0.0)]
-            ++ [to_xyz(UpLat, I*72.0) || I <- lists:seq(0,4)]
-            ++ [to_xyz(DnLat, I*72.0+36.0) || I <- lists:seq(0,4)]
-            ++ [to_xyz(-90.0, 0.0)],
+            Verts = [to_xyz({90.0, 0.0})]
+            ++ [to_xyz({UpLat, I*72.0}) || I <- lists:seq(0,4)]
+            ++ [to_xyz({DnLat, I*72.0+36.0}) || I <- lists:seq(0,4)]
+            ++ [to_xyz({-90.0, 0.0})],
             persistent_term:put({?MODULE, ico_verts}, Verts),
             Verts;
         Verts -> Verts
     end.
 
-nearest_face(X, Y, Z) ->
+nearest_face({X, Y, Z}) ->
     Cs = face_centres(),
     Pairs = lists:zip([X*Cx+Y*Cy+Z*Cz || {Cx,Cy,Cz} <- Cs], lists:seq(0, length(Cs)-1)),
     {_, Idx} = lists:foldl(fun({D,I},{BD,_}) when D > BD ->
@@ -134,7 +126,7 @@ face_basis(Face) ->
     V = unit(cross({Cx,Cy,Cz}, U)),
     {{Cx,Cy,Cz}, U, V}.
 
-project(X, Y, Z, Face) ->
+project({X, Y, Z}, Face) ->
     {{Cx,Cy,Cz},{Ux,Uy,Uz},{Vx,Vy,Vz}} = face_basis(Face),
     D  = X*Cx + Y*Cy + Z*Cz,
     Px = X/D-Cx, Py = Y/D-Cy, Pz = Z/D-Cz,
@@ -148,7 +140,7 @@ unproject(Qf, Rf, Face) ->
 
 %% --- grid snapping ---
 
-to_grid(Q, R, Res) ->
+to_grid({Q, R}, Res) ->
     Scale = ?BASE_SCALE / math:pow(2.0, Res),
     hex_round(Q / Scale, R / Scale).
 
@@ -156,30 +148,48 @@ hex_round(Qf, Rf) ->
     Sf = -Qf - Rf,
     Qi = round(Qf), Ri = round(Rf), Si = round(Sf),
     DQ = abs(Qi-Qf), DR = abs(Ri-Rf), DS = abs(Si-Sf),
-    if DQ > DR, DQ > DS -> {-Ri-Si, Ri};
-       DR > DS           -> {Qi, -Qi-Si};
-       true              -> {Qi, Ri}
+    if
+        DQ > DR, DQ > DS ->
+            {-Ri-Si, Ri};
+        DR > DS ->
+            {Qi, -Qi-Si};
+        true ->
+            {Qi, Ri}
     end.
 
 %% --- digit encoding (returns flat charlist) ---
 
-to_digits(QG, RG, Res) ->
+to_code(Face, Axial, Res) ->
+    Digits = to_digits(Axial, Res),
+    FaceBin = integer_to_binary(Face, ?NR_FACES),
+    <<FaceBin/binary, $-, Digits/binary>>.
+
+from_code(<<FaceBin:1/binary, $-, DigitsBin/binary>>) ->
+    Face = binary_to_integer(FaceBin, ?NR_FACES),
+    Res = byte_size(DigitsBin),
+    Axial = from_digits(binary_to_list(DigitsBin), Res),
+    {Face, Axial, Res}.
+
+to_digits({QG, RG}, Res) ->
     Off = 1 bsl (Res-1),
-    Q   = QG + Off,
-    R   = RG + Off,
-    [$0 + ((Q bsr (Res-L)) band 1)*2 + ((R bsr (Res-L)) band 1)
-     || L <- lists:seq(1, Res)].
+    to_digits1(QG + Off, RG + Off, Res-1, <<>>).
+
+to_digits1(Q, R, L, Acc) when L >= 0 ->
+    N = ((Q bsr L) band 1) * 2 + ((R bsr (L)) band 1),
+    to_digits1(Q, R, L-1, <<Acc/binary, (N + $0)>>);
+to_digits1(_Q, _R, _L, Acc) ->
+    Acc.
 
 from_digits(Digits, Res) ->
     Off = 1 bsl (Res-1),
     {Q, R} = lists:foldl(
-        fun({D, L}, {Qa, Ra}) ->
-            Bit = Res - L,
-            {Qa + ((D bsr 1) bsl Bit),
-             Ra + ((D band 1) bsl Bit)}
-        end,
-        {0, 0},
-        lists:zip([C - $0 || C <- Digits], lists:seq(1, Res))),
+               fun({D, L}, {Qa, Ra}) ->
+                       Bit = Res - L,
+                       {Qa + ((D bsr 1) bsl Bit), Ra + ((D band 1) bsl Bit)}
+               end,
+               {0, 0},
+               lists:zip([C - $0 || C <- Digits],
+                         lists:seq(1, Res))),
     {Q - Off, R - Off}.
 
 %% --- math helpers ---
@@ -193,6 +203,8 @@ unit({X, Y, Z}) ->
             {X/R, Y/R, Z/R}
     end.
 
-cross({Ax, Ay, Az},{Bx, By, Bz}) ->
-    {Ay*Bz - Az*By, Az*Bx - Ax*Bz, Ax*By - Ay*Bx}.
+cross({Ax, Ay, Az}, {Bx, By, Bz}) ->
+    {Ay*Bz - Az*By,
+     Az*Bx - Ax*Bz,
+     Ax*By - Ay*Bx}.
 

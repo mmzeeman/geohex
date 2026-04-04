@@ -13,7 +13,7 @@ roundtrip_test() ->
     ],
     lists:foreach(fun({Lat, Lon}) ->
         Res = 7,
-        Code = isea4h:encode(Lat, Lon, Res),
+        Code = isea4h:encode({Lat, Lon}, Res),
         {DLat, DLon} = isea4h:decode(Code),
         MaxErr = 1.0,
         IsPole = abs(Lat) > 89.0,
@@ -30,7 +30,7 @@ roundtrip_test() ->
 roundtrip_res_test() ->
     Lat = 20.0, Lon = 10.0,
     lists:foreach(fun(Res) ->
-        Code = isea4h:encode(Lat, Lon, Res),
+        Code = isea4h:encode({Lat, Lon}, Res),
         {DLat, DLon} = isea4h:decode(Code),
         %% At Res 1, error can be large (half a face).
         MaxErr = 2.0 / math:pow(2.0, Res-5), %% Heuristic
@@ -45,13 +45,13 @@ roundtrip_res_test() ->
 
 %% encode/2 should default to resolution 7
 default_res_test() ->
-    Code = isea4h:encode(4.56, 1.23),
+    Code = isea4h:encode({4.56, 1.23}),
     [_,Digits] = string:split(binary_to_list(Code), "-"),
     ?assertEqual(7, length(Digits)).
 
 %% parent should remove one digit at the end (or leave as-is for resolution 1)
 parent_test() ->
-    Code = isea4h:encode(20.0, 10.0, 6),
+    Code = isea4h:encode({20.0, 10.0}, 6),
     Parent = isea4h:parent(Code),
     [_, Digits] = string:split(binary_to_list(Code), "-"),
     [_, Pdigits] = string:split(binary_to_list(Parent), "-"),
@@ -59,21 +59,10 @@ parent_test() ->
 
 %% neighbors returns six binary neighbor codes
 neighbors_test() ->
-    Code = isea4h:encode(20.0, 10.0, 5),
+    Code = isea4h:encode({20.0, 10.0}, 5),
     N = isea4h:neighbors(Code),
     ?assertEqual(6, length(N)),
     lists:foreach(fun(C) -> ?assert(is_binary(C)) end, N).
-
-%% privacy_code returns codes of the expected length for each privacy level
-privacy_test() ->
-    [_,D1] = string:split(binary_to_list(isea4h:privacy_code(0.0,0.0, city)), "-"),
-    [_,D2] = string:split(binary_to_list(isea4h:privacy_code(0.0,0.0, district)), "-"),
-    [_,D3] = string:split(binary_to_list(isea4h:privacy_code(0.0,0.0, neighbourhood)), "-"),
-    [_,D4] = string:split(binary_to_list(isea4h:privacy_code(0.0,0.0, block)), "-"),
-    ?assertEqual(4, length(D1)),
-    ?assertEqual(6, length(D2)),
-    ?assertEqual(7, length(D3)),
-    ?assertEqual(9, length(D4)).
 
 %% ico_verts returns the expected number of vertices (12)
 ico_test() ->
@@ -129,23 +118,21 @@ face_centres_test() ->
     
     %% For each center, encode it and verify the face ID
     lists:foreach(fun({I, {X, Y, Z}}) ->
-        %% Convert XYZ center back to Lon/Lat for encoding
-        D2R = math:pi() / 180.0,
-        R = math:sqrt(X*X + Y*Y + Z*Z),
-        Lat = math:asin(Z/R) / D2R,
-        Lon = math:atan2(Y, X) / D2R,
+                          %% Convert XYZ center back to Lon/Lat for encoding
+                          D2R = math:pi() / 180.0,
+                          R = math:sqrt(X*X + Y*Y + Z*Z),
+                          Lat = math:asin(Z/R) / D2R,
+                          Lon = math:atan2(Y, X) / D2R,
+
+                          <<FaceBin:1/binary, $-, DigitsBin/binary>> = isea4h:encode({Lat, Lon}, 7),
+                          ?assertEqual(I, binary_to_integer(FaceBin, 20), 
+                                       io_lib:format("Center of face ~p encoded to face ~s", [I, FaceBin])),
         
-        Code = isea4h:encode(Lat, Lon, 7),
-        [FaceStr, Digits] = string:split(binary_to_list(Code), "-"),
-        
-        ?assertEqual(I, list_to_integer(FaceStr), 
-                    io_lib:format("Center of face ~p encoded to face ~s", [I, FaceStr])),
-        
-        %% At center (Q=0, R=0), with Off=1 bsl (Res-1), 
-        %% the first digit should be (1<<Bit)*2 + (1<<Bit) = 3.
-        %% Subsequent digits should be 0.
-        ?assertEqual("3000000", Digits, 
-                    io_lib:format("Center of face ~p produced digits ~s", [I, Digits]))
+                          %% At center (Q=0, R=0), with Off=1 bsl (Res-1), 
+                          %% the first digit should be (1<<Bit)*2 + (1<<Bit) = 3.
+                          %% Subsequent digits should be 0.
+                          ?assertEqual(<<"3000000">>, DigitsBin, io_lib:format("Center of face ~p produced digits ~s", [I, DigitsBin]))
                     
-    end, lists:zip(lists:seq(0, 19), Centres)),
+                  end,
+                  lists:zip(lists:seq(0, 19), Centres)),
     ok.
