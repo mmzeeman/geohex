@@ -1,11 +1,11 @@
 -module(isea4h).
--export([encode/3, encode/2, privacy_code/3, parent/1, neighbors/1, decode/1, ico_verts/0]).
+-export([encode/3, encode/2, privacy_code/3, parent/1, neighbors/1, decode/1, ico_verts/0, face_centres/0]).
 
 -define(D2R, 0.017453292519943295). % (math:pi() / 180.0)).
 -define(BASE_SCALE, 2.0).
 
-encode(Lon, Lat, Res) when Res >= 1, Res =< 12 ->
-    {X, Y, Z} = to_xyz(Lon, Lat),
+encode(Lat, Lon, Res) when Res >= 1, Res =< 12 ->
+    {X, Y, Z} = to_xyz(Lat, Lon),
     Face = nearest_face(X, Y, Z),
     {Q, R} = project(X, Y, Z, Face),
     {QG, RG} = to_grid(Q, R, Res),
@@ -13,17 +13,17 @@ encode(Lon, Lat, Res) when Res >= 1, Res =< 12 ->
     FaceStr = io_lib:format("~2..0B", [Face]),
     iolist_to_binary([FaceStr, "-", Digits]).
 
-encode(Lon, Lat) ->
-    encode(Lon, Lat, 7).
+encode(Lat, Lon) ->
+    encode(Lat, Lon, 7).
 
-privacy_code(Lon, Lat, city) ->
-    encode(Lon, Lat, 4);
-privacy_code(Lon, Lat, district) ->
-    encode(Lon, Lat, 6);
-privacy_code(Lon, Lat, neighbourhood) ->
-    encode(Lon, Lat, 7);
-privacy_code(Lon, Lat, block) ->
-    encode(Lon, Lat, 9).
+privacy_code(Lat, Lon, city) ->
+    encode(Lat, Lon, 4);
+privacy_code(Lat, Lon, district) ->
+    encode(Lat, Lon, 6);
+privacy_code(Lat, Lon, neighbourhood) ->
+    encode(Lat, Lon, 7);
+privacy_code(Lat, Lon, block) ->
+    encode(Lat, Lon, 9).
 
 parent(Code) when is_binary(Code) -> parent(binary_to_list(Code));
 parent(Code) ->
@@ -57,11 +57,11 @@ decode(Code) ->
     {X, Y, Z} = unproject(Qf, Rf, Face),
     Lon = math:atan2(Y, X) / ?D2R,
     Lat = math:asin(Z) / ?D2R,
-    {Lon, Lat}.
+    {Lat, Lon}.
 
 %% --- sphere geometry ---
 
-to_xyz(Lon, Lat) ->
+to_xyz(Lat, Lon) ->
     Lo = Lon * ?D2R, La = Lat * ?D2R,
     {math:cos(La)*math:cos(Lo),
      math:cos(La)*math:sin(Lo),
@@ -101,10 +101,10 @@ ico_verts() ->
         undefined ->
             UpLat = math:atan(0.5) / ?D2R,
             DnLat = -UpLat,
-            Verts = [to_xyz(0.0, 90.0)]
-            ++ [to_xyz(I*72.0, UpLat) || I <- lists:seq(0,4)]
-            ++ [to_xyz(I*72.0+36.0,  DnLat) || I <- lists:seq(0,4)]
-            ++ [to_xyz(0.0, -90.0)],
+            Verts = [to_xyz(90.0, 0.0)]
+            ++ [to_xyz(UpLat, I*72.0) || I <- lists:seq(0,4)]
+            ++ [to_xyz(DnLat, I*72.0+36.0) || I <- lists:seq(0,4)]
+            ++ [to_xyz(-90.0, 0.0)],
             persistent_term:put({?MODULE, ico_verts}, Verts),
             Verts;
         Verts -> Verts

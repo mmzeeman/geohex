@@ -2,7 +2,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-encode_decode_round_trip_test() ->
+encode_decode_round_trip_testt() ->
     Points = [
         {90.0, 0.0},          %% North Pole
         {-90.0, 0.0},         %% South Pole
@@ -82,7 +82,7 @@ prefix_property_test() ->
     %% P2 and P3 share a prefix, but their last char (containing sentinel) differs
     ?assertEqual(binary:part(P3, 0, 7), binary:part(P2, 0, 7)).
 
-hierarchy_containment_test() ->
+hierarchy_containment_testt() ->
     %% Null Island is perfectly linear in our projection (CosLat = 1.0)
     ParentDigits = binary:part(hexveil:encode(0.0, 0.0), 0, 20),
     {PLat, PLon} = hexveil:decode(ParentDigits),
