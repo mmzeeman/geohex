@@ -221,7 +221,7 @@ neighbors_2_no_overlap_test() ->
     Overlap = [C || C <- N2, lists:member(C, N1)],
     ?assertEqual([], Overlap).
 
-%% neighbors_2 forms the second ring – cells are farther away than first-ring cells
+%% neighbors_2 forms the second ring -- cells are farther away than first-ring cells
 neighbors_2_farther_than_ring1_test() ->
     Code = isea4h:encode({20.0, 10.0}, 7),
     {Lat, Lon} = isea4h:decode(Code),
@@ -268,3 +268,174 @@ neighbors_2_consistency_test() ->
                                   [NCode, NLon, Code, Lon]))
         end, N2)
     end, TestPoints).
+
+%% ---------------------------------------------------------------------------
+%% cell_geometry tests
+%% ---------------------------------------------------------------------------
+
+%% cell_geometry returns exactly 6 corner coordinates as {Lat, Lon} floats
+cell_geometry_basic_test() ->
+    Code = isea4h:encode({20.0, 10.0}, 6),
+    Corners = isea4h:cell_geometry(Code),
+    ?assertEqual(6, length(Corners)),
+    lists:foreach(fun({Lat, Lon}) ->
+        ?assert(is_float(Lat)),
+        ?assert(is_float(Lon)),
+        ?assert(Lat >= -90.0 andalso Lat =< 90.0,
+                io_lib:format("Corner Lat ~p out of range", [Lat])),
+        ?assert(Lon >= -180.0 andalso Lon =< 180.0,
+                io_lib:format("Corner Lon ~p out of range", [Lon]))
+    end, Corners).
+
+%% All 6 corners should be close to the cell center (within a few degrees at Res 7)
+cell_geometry_corners_near_center_test() ->
+    TestPoints = [
+        {0.0,   0.0},
+        {20.0,  10.0},
+        {45.0,  45.0},
+        {-30.0, 120.0}
+    ],
+    Res = 7,
+    lists:foreach(fun(Coord) ->
+        Code = isea4h:encode(Coord, Res),
+        {CLat, CLon} = isea4h:decode(Code),
+        Corners = isea4h:cell_geometry(Code),
+        ?assertEqual(6, length(Corners)),
+        lists:foreach(fun({CornerLat, CornerLon}) ->
+            ?assert(abs(CornerLat - CLat) < 5.0,
+                    io_lib:format("Corner lat ~p too far from cell center ~p", [CornerLat, CLat]));
+            DLon = abs(CornerLon - CLon),
+            WrappedDLon = lists:min([DLon, abs(DLon - 360.0)]),
+            ?assert(WrappedDLon < 10.0,
+                    io_lib:format("Corner lon ~p too far from cell center ~p", [CornerLon, CLon]))
+        end, Corners)
+    end, TestPoints).
+
+%% Corners should be distinct -- no two corners should be identical
+cell_geometry_corners_distinct_test() ->
+    TestPoints = [
+        {0.0,    0.0},
+        {20.0,   10.0},
+        {-60.0, -80.0}
+    ],
+    Res = 7,
+    lists:foreach(fun(Coord) ->
+        Code = isea4h:encode(Coord, Res),
+        Corners = isea4h:cell_geometry(Code),
+        UniqueCorners = lists:usort(Corners),
+        ?assertEqual(6, length(UniqueCorners),
+                     io_lib:format("cell_geometry for ~p produced duplicate corners: ~p",
+                                   [Code, Corners]))
+    end, TestPoints).
+
+%% cell_geometry should not crash and return 6 corners for cells near every
+%% icosahedron vertex (the sharpest face-edge meeting points).
+cell_geometry_near_ico_vertices_test() ->
+    D2R = math:pi() / 180.0,
+    UpLat = math:atan(0.5) / D2R,   %% ~26.565 deg
+    DnLat = -UpLat,
+    %% The 12 icosahedron vertices:
+    %%   0: North Pole
+    %%   1-5: upper ring at UpLat, every 72 deg starting at lon 0
+    %%   6-10: lower ring at DnLat, every 72 deg starting at lon 36
+    %%   11: South Pole
+    %%
+    Vertices = [
+        {90.0,    0.0},
+        {UpLat,   0.0}, {UpLat,  72.0}, {UpLat, 144.0}, {UpLat, -144.0}, {UpLat, -72.0},
+        {DnLat,  36.0}, {DnLat, 108.0}, {DnLat, 180.0}, {DnLat, -108.0}, {DnLat,  -36.0},
+        {-90.0,   0.0}
+    ],
+    Res = 7,
+    lists:foreach(fun({Lat, Lon}) ->
+        Code = isea4h:encode({Lat, Lon}, Res),
+        Corners = isea4h:cell_geometry(Code),
+        ?assertEqual(6, length(Corners),
+                     io_lib:format("cell_geometry near vertex (~p,~p) did not return 6 corners", [Lat, Lon])),
+        lists:foreach(fun({CLat, CLon}) ->
+            ?assert(is_float(CLat) andalso is_float(CLon),
+                    io_lib:format("Non-float corner near vertex (~p,~p)", [Lat, Lon]));
+            ?assert(CLat >= -90.0 andalso CLat =< 90.0,
+                    io_lib:format("Corner lat ~p out of range near vertex (~p,~p)", [CLat, Lat, Lon]));
+            ?assert(CLon >= -180.0 andalso CLon =< 180.0,
+                    io_lib:format("Corner lon ~p out of range near vertex (~p,~p)", [CLon, Lat, Lon]))
+        end, Corners)
+    end, Vertices).
+
+%% Cells just across a face edge should both return valid 6-corner geometry.
+%% We probe a cluster of points tightly around each upper-ring vertex and
+%% confirm that every cell on any face still produces well-formed geometry.
+cell_geometry_across_face_edges_test() ->
+    D2R = math:pi() / 180.0,
+    UpLat = math:atan(0.5) / D2R,
+    %% Sample a fine grid around upper-ring vertex 1 (UpLat, 0.0) --
+    %% the five faces that meet here guarantee face-crossing cells appear.
+    Offsets = [-0.5, -0.1, 0.0, 0.1, 0.5],
+    Res = 8,
+    [begin
+         Code = isea4h:encode({UpLat + DLat, DLon}, Res),
+         Corners = isea4h:cell_geometry(Code),
+         ?assertEqual(6, length(Corners),
+                      io_lib:format("Expected 6 corners near face edge at (~p,~p), got ~p",
+                                    [UpLat + DLat, DLon, length(Corners)])),
+         %% Every corner must be a finite, in-range {Lat, Lon}.
+         lists:foreach(fun({CLat, CLon}) ->
+             ?assert(CLat >= -90.0 andalso CLat =< 90.0,
+                     io_lib:format("Corner lat ~p out of range at offset (~p,~p)",
+                                   [CLat, DLat, DLon]));
+             ?assert(CLon >= -180.0 andalso CLon =< 180.0,
+                     io_lib:format("Corner lon ~p out of range at offset (~p,~p)",
+                                   [CLon, DLat, DLon]))
+         end, Corners)
+     end
+     || DLat <- Offsets, DLon <- Offsets].
+
+%% Corners of a cell should surround the cell center:
+%% the center's decoded lat/lon must lie within the bounding box of the corners.
+cell_geometry_center_inside_bbox_test() ->
+    TestPoints = [
+        {0.0,   0.0},
+        {20.0,  10.0},
+        {45.0,  45.0},
+        {-30.0, 120.0},
+        {-60.0, -80.0}
+    ],
+    Res = 7,
+    lists:foreach(fun(Coord) ->
+        Code = isea4h:encode(Coord, Res),
+        {CLat, CLon} = isea4h:decode(Code),
+        Corners = isea4h:cell_geometry(Code),
+        Lats = [Lat || {Lat, _} <- Corners],
+        Lons = [Lon || {_, Lon} <- Corners],
+        MinLat = lists:min(Lats), MaxLat = lists:max(Lats),
+        MinLon = lists:min(Lons), MaxLon = lists:max(Lons),
+        %% Add a small tolerance for floating-point/projection artefacts.
+        Eps = 0.5,
+        ?assert(CLat >= MinLat - Eps andalso CLat =< MaxLat + Eps,
+                io_lib:format("Center lat ~p not inside corner bbox [~p, ~p] for ~s",
+                              [CLat, MinLat, MaxLat, Code])),
+        %% Longitude bbox check -- skip if the cell spans the antimeridian.
+        LonSpan = MaxLon - MinLon,
+        case LonSpan < 180.0 of
+            true ->
+                ?assert(CLon >= MinLon - Eps andalso CLon =< MaxLon + Eps,
+                        io_lib:format("Center lon ~p not inside corner bbox [~p, ~p] for ~s",
+                                      [CLon, MinLon, MaxLon, Code]));
+            false ->
+                ok  %% Antimeridian-crossing cell: skip lon bbox check
+        end
+    end, TestPoints).
+
+%% cell_geometry result should be consistent: calling it twice gives the same corners.
+cell_geometry_deterministic_test() ->
+    Code = isea4h:encode({20.0, 10.0}, 7),
+    ?assertEqual(isea4h:cell_geometry(Code), isea4h:cell_geometry(Code)).
+
+%% cell_geometry should work at all supported resolutions without crashing.
+cell_geometry_all_resolutions_test() ->
+    lists:foreach(fun(Res) ->
+        Code = isea4h:encode({20.0, 10.0}, Res),
+        Corners = isea4h:cell_geometry(Code),
+        ?assertEqual(6, length(Corners),
+                     io_lib:format("Expected 6 corners at resolution ~p", [Res]))
+    end, lists:seq(1, 12)).
