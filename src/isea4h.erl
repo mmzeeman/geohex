@@ -98,13 +98,10 @@ cell_geometry(<<FaceBin:1/binary, $-, DigitsBin/binary>>, Res) ->
                        true ->
                            XYZ;
                        false ->
-                           %% Point crossed boundary, re-project properly?
-                           %% For seamlessness, the vertices must be identical.
-                           %%
-                           %% Gnomonic projection doesn't naturally stitch.
-                           %% We use the original XYZ but normalized.
-                           %%to_xyz(project(XYZ, Nearest))
-                           XYZ
+                           %% Corner lies over a neighbouring face.
+                           %% Normalise through that face's gnomonic plane so
+                           %% that adjacent cells produce identical shared vertices.
+                           unproject(project(XYZ, Nearest), Nearest)
                    end,      
         from_xyz(FinalXYZ) 
      end || Delta <- CornerOffsets].
